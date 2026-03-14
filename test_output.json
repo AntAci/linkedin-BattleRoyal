@@ -1,0 +1,23 @@
+{
+  "connection": 0,
+  "data": {
+    "firstName": "",
+    "lastName": "",
+    "isOpenToWork": false,
+    "isHiring": false,
+    "profilePicture": "",
+    "summary": "",
+    "headline": "",
+    "geo": {
+      "country": "",
+      "city": "",
+      "full": ""
+    },
+    "languages": [],
+    "educations": [],
+    "position": [],
+    "skills": [],
+    "courses": []
+  },
+  "follower": 0
+}
