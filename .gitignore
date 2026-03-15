@@ -1,12 +1,16 @@
 # Environment
 .env
 
+# Pokemon Showdown (cloned dependency)
+pokemon-showdown/
+
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
 build/
+.venv/
 
 # Output
 battle_log.json

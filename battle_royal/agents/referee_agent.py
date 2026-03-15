@@ -1,4 +1,4 @@
-"""LangChain agent that narrates battles Pokemon-commentator style."""
+"""LangChain agent that narrates Pokemon Showdown battles."""
 
 from typing import List
 
@@ -10,16 +10,19 @@ NARRATE_TURN_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "You are an excited Pokemon battle commentator narrating a fight "
-        "between two professional fighters. Keep it fun, dramatic, and "
-        "reference their real professional backgrounds. 2-3 sentences max.",
+        "between two professionals battling as real Pokemon. Keep it fun, dramatic, "
+        "and reference both the Pokemon and the person's real name. 2-3 sentences max.",
     ),
     (
         "human",
-        "Turn {turn}: {attacker} used {move_name} against {defender}!\n"
-        "Damage dealt: {damage} (effectiveness: {effectiveness})\n"
-        "Critical hit: {critical}\n"
-        "{attacker} HP: {attacker_hp}/{attacker_max_hp}\n"
-        "{defender} HP: {defender_hp}/{defender_max_hp}\n"
+        "Turn {turn}:\n"
+        "{moves_summary}\n"
+        "Damage: {damage_summary}\n"
+        "Effectiveness: {effectiveness}\n"
+        "Critical hit: {critical_hits}\n"
+        "Faints: {faints}\n"
+        "{p1_name}: {p1_hp_pct:.0f}% HP\n"
+        "{p2_name}: {p2_hp_pct:.0f}% HP\n"
         "Narrate this moment!",
     ),
 ])
@@ -29,16 +32,15 @@ FINAL_NARRATION_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "You are a Pokemon battle commentator delivering the final "
-        "verdict. Be dramatic and celebratory. Reference both fighters' "
-        "professional backgrounds. 3-4 sentences.",
+        "verdict. Be dramatic and celebratory. Reference both the Pokemon species "
+        "and the person's real name. 3-4 sentences.",
     ),
     (
         "human",
-        "The battle between {fighter1} ({types1}) and {fighter2} ({types2}) "
-        "is over!\n"
+        "The battle between {fighter1} and {fighter2} is over!\n"
         "Winner: {winner}\n"
+        "Loser: {loser}\n"
         "Total turns: {total_turns}\n"
-        "Winner's remaining HP: {winner_hp}/{winner_max_hp}\n"
         "Deliver the final narration!",
     ),
 ])
@@ -57,53 +59,45 @@ class RefereeAgent:
     def narrate_turn(
         self,
         turn: int,
-        attacker: str,
-        defender: str,
-        move_name: str,
-        damage: int,
+        moves_summary: str,
+        damage_summary: str,
         effectiveness: str,
-        critical: bool,
-        attacker_hp: int,
-        attacker_max_hp: int,
-        defender_hp: int,
-        defender_max_hp: int,
+        critical_hits: bool,
+        faints: List[str],
+        p1_name: str,
+        p2_name: str,
+        p1_hp_pct: float,
+        p2_hp_pct: float,
     ) -> str:
         chain = NARRATE_TURN_PROMPT | self.llm
         result = chain.invoke({
             "turn": turn,
-            "attacker": attacker,
-            "defender": defender,
-            "move_name": move_name,
-            "damage": damage,
+            "moves_summary": moves_summary,
+            "damage_summary": damage_summary,
             "effectiveness": effectiveness,
-            "critical": "Yes!" if critical else "No",
-            "attacker_hp": attacker_hp,
-            "attacker_max_hp": attacker_max_hp,
-            "defender_hp": defender_hp,
-            "defender_max_hp": defender_max_hp,
+            "critical_hits": "Yes!" if critical_hits else "No",
+            "faints": ", ".join(faints) if faints else "None",
+            "p1_name": p1_name,
+            "p2_name": p2_name,
+            "p1_hp_pct": p1_hp_pct,
+            "p2_hp_pct": p2_hp_pct,
         })
         return result.content
 
     def final_narration(
         self,
         fighter1: str,
-        types1: List[str],
         fighter2: str,
-        types2: List[str],
         winner: str,
+        loser: str,
         total_turns: int,
-        winner_hp: int,
-        winner_max_hp: int,
     ) -> str:
         chain = FINAL_NARRATION_PROMPT | self.llm
         result = chain.invoke({
             "fighter1": fighter1,
-            "types1": "/".join(types1),
             "fighter2": fighter2,
-            "types2": "/".join(types2),
             "winner": winner,
+            "loser": loser,
             "total_turns": total_turns,
-            "winner_hp": winner_hp,
-            "winner_max_hp": winner_max_hp,
         })
         return result.content

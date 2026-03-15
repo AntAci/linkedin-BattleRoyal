@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Battle Royal</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     PHASE 1 — Upload
+     ═══════════════════════════════════════════════ -->
+<div id="uploadPhase">
+    <div class="header">
+        <h1>LinkedIn Battle Royal</h1>
+        <p>Upload two CVs. Watch them fight as Pokemon.</p>
+    </div>
+
+    <div class="arena">
+        <div class="fighter-slot p1" id="slot1" onclick="document.getElementById('file1').click()">
+            <div class="slot-label">Fighter 1</div>
+            <div class="slot-icon">&#128196;</div>
+            <div class="slot-text">Drop or click to upload PDF</div>
+            <div class="file-name" id="fname1"></div>
+            <input type="file" id="file1" accept=".pdf">
+        </div>
+
+        <div class="vs-section">
+            <div class="vs-text">VS</div>
+            <button class="battle-btn" id="battleBtn" disabled onclick="startBattle()">
+                Start Battle
+            </button>
+        </div>
+
+        <div class="fighter-slot p2" id="slot2" onclick="document.getElementById('file2').click()">
+            <div class="slot-label">Fighter 2</div>
+            <div class="slot-icon">&#128196;</div>
+            <div class="slot-text">Drop or click to upload PDF</div>
+            <div class="file-name" id="fname2"></div>
+            <input type="file" id="file2" accept=".pdf">
+        </div>
+    </div>
+
+    <!-- Progress (shown during processing) -->
+    <div class="progress-section" id="progress">
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-status" id="progressStatus">Starting...</div>
+        <div class="steps">
+            <div class="step" id="step0">Upload</div>
+            <div class="step" id="step1">Extract P1</div>
+            <div class="step" id="step2">Extract P2</div>
+            <div class="step" id="step3">Battle</div>
+            <div class="step" id="step4">Done</div>
+        </div>
+    </div>
+
+    <!-- Fighter cards (appear during extraction) -->
+    <div class="fighter-cards" id="fighterCards">
+        <div class="fighter-card p1" id="card1"></div>
+        <div class="fighter-card p2" id="card2"></div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PHASE 2 — Battle Scene
+     ═══════════════════════════════════════════════ -->
+<div id="battlePhase" class="hidden">
+
+    <!-- Battle field -->
+    <div class="battle-scene">
+        <div class="battle-bg">
+            <!-- Opponent (top-right) -->
+            <div class="battle-pane opponent-pane">
+                <div class="hp-box opponent-hp-box">
+                    <div class="hp-name" id="oppName"></div>
+                    <div class="hp-bar-outer">
+                        <div class="hp-bar-inner" id="oppHpBar" style="width:100%"></div>
+                    </div>
+                    <div class="hp-text" id="oppHpText">100%</div>
+                </div>
+                <img class="battle-sprite opponent-sprite" id="oppSprite" src="" alt="">
+            </div>
+
+            <!-- Player (bottom-left) -->
+            <div class="battle-pane player-pane">
+                <img class="battle-sprite player-sprite" id="plySprite" src="" alt="">
+                <div class="hp-box player-hp-box">
+                    <div class="hp-name" id="plyName"></div>
+                    <div class="hp-bar-outer">
+                        <div class="hp-bar-inner" id="plyHpBar" style="width:100%"></div>
+                    </div>
+                    <div class="hp-text" id="plyHpText">100%</div>
+                </div>
+            </div>
+
+            <!-- Hit flash overlays -->
+            <div class="hit-flash" id="oppHitFlash"></div>
+            <div class="hit-flash" id="plyHitFlash"></div>
+
+            <!-- Attack FX canvas -->
+            <canvas id="fxCanvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
+
+            <!-- Move name popup -->
+            <div class="move-name-popup" id="movePopup"></div>
+        </div>
+
+        <!-- Text box -->
+        <div class="text-box" id="textBox">
+            <span id="textContent">Battle start!</span>
+        </div>
+    </div>
+
+    <!-- Turn counter -->
+    <div class="turn-counter" id="turnCounter">Turn 0</div>
+
+    <!-- Playback controls -->
+    <div class="playback-controls">
+        <button class="ctrl-btn" id="btnPrev" onclick="prevAction()">&laquo; Prev</button>
+        <button class="ctrl-btn" id="btnPlayPause" onclick="togglePlay()">&#9654; Play</button>
+        <button class="ctrl-btn" id="btnNext" onclick="nextAction()">Next &raquo;</button>
+        <button class="ctrl-btn" id="btnSpeed" onclick="cycleSpeed()">1x</button>
+        <button class="ctrl-btn" id="btnMusic" onclick="toggleMusic()">Music On</button>
+        <button class="ctrl-btn" id="btnSfx" onclick="toggleSfx()">SFX On</button>
+        <button class="ctrl-btn" id="btnTts" onclick="toggleTts()">Commentary On</button>
+    </div>
+
+    <!-- Narration panel (scrolls with turns) -->
+    <div class="narration-log" id="narrationLog"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PHASE 3 — Result
+     ═══════════════════════════════════════════════ -->
+<div id="resultPhase" class="hidden">
+    <div class="result-winner" id="resultWinner"></div>
+    <div class="result-narration" id="resultNarration"></div>
+    <button class="battle-btn" onclick="location.reload()" style="margin:2rem auto;display:block;">
+        New Battle
+    </button>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════
+   AUDIO — SFX (Web Audio API) + TTS commentary
+   ════════════════════════════════════════════════ */
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+
+function ensureAudioCtx() {
+    if (!AudioCtx) return null;
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+}
+
+// ── Synthesized SFX ─────────────────────────────
+function playSfx(type) {
+    if (sfxMuted) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    switch (type) {
+        case 'hit':      sfxHit(ctx); break;
+        case 'supereff':  sfxSuperEff(ctx); break;
+        case 'crit':     sfxCrit(ctx); break;
+        case 'faint':    sfxFaint(ctx); break;
+        case 'move':     sfxMove(ctx); break;
+    }
+}
+
+function sfxHit(ctx) {
+    // Short noise burst
+    const dur = 0.15;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.3;
+    src.connect(gain).connect(ctx.destination);
+    src.start();
+}
+
+function sfxSuperEff(ctx) {
+    // Rising tone
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(400, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.25);
+}
+
+function sfxCrit(ctx) {
+    // Double hit
+    sfxHit(ctx);
+    setTimeout(() => sfxHit(ctx), 80);
+}
+
+function sfxFaint(ctx) {
+    // Descending tone
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.8);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.8);
+}
+
+function sfxMove(ctx) {
+    // Quick whoosh
+    const dur = 0.2;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+        const t = i / data.length;
+        data[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI) * 0.5;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(800, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(2400, ctx.currentTime + dur);
+    const gain = ctx.createGain();
+    gain.gain.value = 0.25;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start();
+}
+
+// ── Battle BGM (procedural lo-fi loop) ──────────
+let bgmOsc = null, bgmGain = null, bgmInterval = null;
+
+function startBGM() {
+    if (musicMuted || bgmInterval) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    bgmGain = ctx.createGain();
+    bgmGain.gain.value = 0.06;
+    bgmGain.connect(ctx.destination);
+
+    const notes = [262, 330, 392, 523, 392, 330, 349, 440, 523, 440];
+    let noteIdx = 0;
+
+    function playNote() {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = notes[noteIdx % notes.length];
+        g.gain.setValueAtTime(1, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+        osc.connect(g).connect(bgmGain);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+        noteIdx++;
+    }
+
+    playNote();
+    bgmInterval = setInterval(playNote, 400);
+}
+
+function stopBGM() {
+    if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
+    if (bgmGain) {
+        bgmGain.gain.value = 0;
+        bgmGain.disconnect();
+        bgmGain = null;
+    }
+}
+
+// ── TTS Commentary (ElevenLabs) ─────────────────
+let battleId = null;
+let hasAudio = false;
+let audioTurns = [];
+let currentTtsAudio = null;
+let musicMuted = false;
+let sfxMuted = false;
+let ttsMuted = false;
+
+function playTurnAudio(turnNumber) {
+    if (ttsMuted || !hasAudio) return Promise.resolve();
+    const key = turnNumber === 'final' ? 'final' : turnNumber;
+    if (!audioTurns.includes(key) && !audioTurns.includes(String(key))) return Promise.resolve();
+
+    return new Promise(resolve => {
+        if (currentTtsAudio) { currentTtsAudio.pause(); currentTtsAudio = null; }
+        const audio = new Audio(`/api/battle/${battleId}/audio/${key}`);
+        currentTtsAudio = audio;
+        audio.volume = 0.8;
+        audio.onended = () => { currentTtsAudio = null; resolve(); };
+        audio.onerror = () => { currentTtsAudio = null; resolve(); };
+        audio.play().catch(() => { currentTtsAudio = null; resolve(); });
+    });
+}
+
+function stopTts() {
+    if (currentTtsAudio) { currentTtsAudio.pause(); currentTtsAudio = null; }
+}
+
+function toggleMusic() {
+    musicMuted = !musicMuted;
+    document.getElementById('btnMusic').textContent = musicMuted ? 'Music Off' : 'Music On';
+    if (musicMuted) stopBGM();
+    else if (!document.getElementById('battlePhase').classList.contains('hidden')) startBGM();
+}
+
+function toggleSfx() {
+    sfxMuted = !sfxMuted;
+    document.getElementById('btnSfx').textContent = sfxMuted ? 'SFX Off' : 'SFX On';
+}
+
+function toggleTts() {
+    ttsMuted = !ttsMuted;
+    document.getElementById('btnTts').textContent = ttsMuted ? 'Commentary Off' : 'Commentary On';
+    if (ttsMuted) stopTts();
+}
+
+/* ────────────────────────────────────────────────
+   Upload logic
+   ──────────────────────────────────────────────── */
+const file1 = document.getElementById('file1');
+const file2 = document.getElementById('file2');
+const battleBtn = document.getElementById('battleBtn');
+
+function checkReady() {
+    battleBtn.disabled = !(file1.files.length && file2.files.length);
+}
+
+file1.addEventListener('change', () => {
+    if (file1.files.length) {
+        document.getElementById('slot1').classList.add('has-file');
+        document.getElementById('fname1').textContent = file1.files[0].name;
+    }
+    checkReady();
+});
+file2.addEventListener('change', () => {
+    if (file2.files.length) {
+        document.getElementById('slot2').classList.add('has-file');
+        document.getElementById('fname2').textContent = file2.files[0].name;
+    }
+    checkReady();
+});
+
+// Drag & drop
+[['slot1','file1','fname1'],['slot2','file2','fname2']].forEach(([sId,fId,lId]) => {
+    const s = document.getElementById(sId), inp = document.getElementById(fId), lbl = document.getElementById(lId);
+    s.addEventListener('dragover', e => { e.preventDefault(); s.style.borderColor='#f7d94e'; });
+    s.addEventListener('dragleave', () => { s.style.borderColor=''; });
+    s.addEventListener('drop', e => {
+        e.preventDefault(); s.style.borderColor='';
+        const f = e.dataTransfer.files[0];
+        if (f && f.type==='application/pdf') {
+            const dt = new DataTransfer(); dt.items.add(f);
+            inp.files = dt.files; s.classList.add('has-file'); lbl.textContent = f.name; checkReady();
+        }
+    });
+});
+
+/* ────────────────────────────────────────────────
+   Sprites
+   ──────────────────────────────────────────────── */
+function spriteUrl(species, back) {
+    const id = species.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/ /g, '');
+    const dir = back ? 'gen5ani-back' : 'gen5ani';
+    return `https://play.pokemonshowdown.com/sprites/${dir}/${id}.gif`;
+}
+function spriteFallback(species, back) {
+    const id = species.toLowerCase().replace(/[^a-z0-9-]/g, '');
+    const dir = back ? 'gen5-back' : 'gen5';
+    return `https://play.pokemonshowdown.com/sprites/${dir}/${id}.png`;
+}
+
+/* ────────────────────────────────────────────────
+   Fighter card rendering
+   ──────────────────────────────────────────────── */
+function renderCard(el, data) {
+    el.innerHTML = `
+        <div class="card-header">
+            <img class="pokemon-sprite" src="${spriteUrl(data.pokemon, false)}"
+                 onerror="this.src='${spriteFallback(data.pokemon, false)}'" alt="${data.pokemon}">
+            <div class="card-header-text">
+                <h3>${data.name}</h3>
+                <div class="pokemon-name">${data.pokemon}</div>
+                <div class="headline">${data.headline || ''}</div>
+            </div>
+        </div>
+        <div class="card-detail">Nature: <span>${data.nature}</span></div>
+        <div class="card-detail">Ability: <span>${data.ability}</span></div>
+        <div class="card-detail" style="font-style:italic;color:#aaa;margin:.5rem 0;">"${data.reasoning}"</div>
+        <ul class="moves-list">${data.moves.map(m => `
+            <li>
+                <span class="move-name">${m.name}</span>
+                <span class="move-meta">${m.basePower>0?'BP:'+m.basePower:'Status'} &middot; Acc:${m.accuracy}
+                    <span class="type-badge type-${m.type}">${m.type}</span>
+                </span>
+            </li>`).join('')}
+        </ul>`;
+    setTimeout(() => el.classList.add('visible'), 50);
+}
+
+/* ────────────────────────────────────────────────
+   Battle start / polling
+   ──────────────────────────────────────────────── */
+let battleData = null; // full state from server
+
+async function startBattle() {
+    battleBtn.disabled = true;
+    battleBtn.textContent = 'Fighting...';
+    ensureAudioCtx();
+    document.getElementById('progress').classList.add('active');
+    document.getElementById('fighterCards').classList.remove('active');
+    document.getElementById('step0').classList.add('done');
+
+    const fd = new FormData();
+    fd.append('pdf1', file1.files[0]);
+    fd.append('pdf2', file2.files[0]);
+
+    try {
+        const res = await fetch('/api/battle', { method:'POST', body:fd });
+        const json = await res.json();
+        if (json.error) { alert(json.error); resetUpload(); return; }
+        battleId = json.battle_id;
+        pollBattle(json.battle_id);
+    } catch(e) { alert('Failed: '+e.message); resetUpload(); }
+}
+
+function pollBattle(id) {
+    const iv = setInterval(async () => {
+        try {
+            const s = (await (await fetch(`/api/battle/${id}`)).json());
+            const step = s.step||0;
+            document.getElementById('progressFill').style.width = (step/4*100)+'%';
+            document.getElementById('progressStatus').textContent = s.status;
+            for (let i=0;i<=4;i++) {
+                const el=document.getElementById('step'+i);
+                el.classList.remove('active','done');
+                if(i<step) el.classList.add('done');
+                else if(i===step) el.classList.add('active');
+            }
+            if (s.fighter1 && !document.getElementById('card1').classList.contains('visible')) {
+                document.getElementById('fighterCards').classList.add('active');
+                renderCard(document.getElementById('card1'), s.fighter1);
+            }
+            if (s.fighter2 && !document.getElementById('card2').classList.contains('visible')) {
+                renderCard(document.getElementById('card2'), s.fighter2);
+            }
+            if (s.status==='complete') {
+                clearInterval(iv);
+                battleData = s;
+                hasAudio = !!s.has_audio;
+                audioTurns = Array.isArray(s.audio_turns) ? s.audio_turns.map(String) : [];
+                document.getElementById('btnTts').disabled = !hasAudio;
+                if (!hasAudio) {
+                    ttsMuted = true;
+                    document.getElementById('btnTts').textContent = 'No Commentary';
+                } else {
+                    ttsMuted = false;
+                    document.getElementById('btnTts').textContent = 'Commentary On';
+                }
+                // Brief pause so user sees the cards, then transition to battle scene
+                setTimeout(() => launchBattleScene(), 1500);
+            }
+            if (s.status==='error') {
+                clearInterval(iv);
+                alert('Error: '+s.error);
+                resetUpload();
+            }
+        } catch(e) { clearInterval(iv); alert('Poll error: '+e.message); resetUpload(); }
+    }, 1500);
+}
+
+function resetUpload() {
+    battleBtn.textContent='Start Battle'; checkReady();
+    document.getElementById('progress').classList.remove('active');
+}
+
+/* ════════════════════════════════════════════════
+   BATTLE SCENE — animated replay
+   ════════════════════════════════════════════════ */
+let allActions = [];   // flat list of {action, player, ...} with turn separators
+let actionIdx = 0;
+let playTimer = null;
+let isPlaying = false;
+const SPEEDS = [1, 2, 3];
+let speedIdx = 0;
+
+function launchBattleScene() {
+    document.getElementById('uploadPhase').classList.add('hidden');
+    document.getElementById('battlePhase').classList.remove('hidden');
+    if (!musicMuted) startBGM();
+
+    const f1 = battleData.fighter1;
+    const f2 = battleData.fighter2;
+
+    // Set sprites — p1 is "player" (back sprite, bottom-left), p2 is "opponent" (front, top-right)
+    const plyImg = document.getElementById('plySprite');
+    plyImg.src = spriteUrl(f1.pokemon, true);
+    plyImg.onerror = function(){ this.src = spriteFallback(f1.pokemon, true); };
+
+    const oppImg = document.getElementById('oppSprite');
+    oppImg.src = spriteUrl(f2.pokemon, false);
+    oppImg.onerror = function(){ this.src = spriteFallback(f2.pokemon, false); };
+
+    document.getElementById('plyName').textContent = f1.pokemon_display;
+    document.getElementById('oppName').textContent = f2.pokemon_display;
+
+    // Build the flat action timeline
+    allActions = [];
+
+    // Intro
+    allActions.push({ type:'text', message:`${f1.pokemon_display} vs ${f2.pokemon_display}!`, p1hp:100, p2hp:100 });
+    allActions.push({ type:'text', message:'Battle start!', p1hp:100, p2hp:100 });
+
+    const turns = battleData.result.turns;
+    for (const turn of turns) {
+        allActions.push({ type:'turn', turn: turn.turn_number });
+
+        for (const a of turn.actions) {
+            allActions.push({
+                type: a.action,
+                player: a.player,
+                move_name: a.move_name,
+                move_type: a.move_type || '',
+                target: a.target,
+                hp_text: a.hp_text,
+                message: a.message,
+                p1hp: turn.p1_hp_pct,
+                p2hp: turn.p2_hp_pct,
+            });
+        }
+
+        // Narration at end of turn
+        if (turn.narration) {
+            allActions.push({ type:'narration', message: turn.narration, turn: turn.turn_number,
+                              p1hp: turn.p1_hp_pct, p2hp: turn.p2_hp_pct });
+        }
+    }
+
+    // Winner
+    allActions.push({ type:'winner', message: battleData.result.final_narration,
+                      winner: battleData.result.winner_player });
+
+    actionIdx = 0;
+    renderAction(allActions[0]);
+
+    // Auto-play
+    startPlay();
+}
+
+function renderAction(a) {
+    if (!a) return Promise.resolve();
+    const textEl = document.getElementById('textContent');
+    const plyBar = document.getElementById('plyHpBar');
+    const oppBar = document.getElementById('oppHpBar');
+    const plyText = document.getElementById('plyHpText');
+    const oppText = document.getElementById('oppHpText');
+
+    switch (a.type) {
+        case 'text':
+            textEl.textContent = a.message;
+            return Promise.resolve();
+
+        case 'turn':
+            document.getElementById('turnCounter').textContent = `Turn ${a.turn}`;
+            textEl.textContent = `--- Turn ${a.turn} ---`;
+            return Promise.resolve();
+
+        case 'move':
+            textEl.textContent = a.message;
+            animateAttack(a.player);
+            showMovePopup(a.move_name, a.move_type, a.player);
+            fireAttackVFX(a.move_type || 'Normal', a.player);
+            playSfx('move');
+            return Promise.resolve();
+
+        case 'damage': {
+            // Parse hp_text like "664/704" or "0 fnt"
+            let pct = 0;
+            if (a.hp_text && a.hp_text !== '0 fnt') {
+                const parts = a.hp_text.split('/');
+                if (parts.length === 2) pct = (parseFloat(parts[0]) / parseFloat(parts[1].split(' ')[0])) * 100;
+            }
+            if (a.player === 'p1') {
+                plyBar.style.width = pct + '%';
+                plyText.textContent = Math.round(pct) + '%';
+                setHpColor(plyBar, pct);
+                animateHit('ply');
+            } else {
+                oppBar.style.width = pct + '%';
+                oppText.textContent = Math.round(pct) + '%';
+                setHpColor(oppBar, pct);
+                animateHit('opp');
+            }
+            playSfx('hit');
+            return Promise.resolve();
+        }
+
+        case 'supereffective':
+            textEl.textContent = a.message;
+            flashScreen('#ffcc00');
+            playSfx('supereff');
+            return Promise.resolve();
+
+        case 'resisted':
+            textEl.textContent = a.message;
+            return Promise.resolve();
+
+        case 'crit':
+            textEl.textContent = a.message;
+            flashScreen('#ff4444');
+            playSfx('crit');
+            return Promise.resolve();
+
+        case 'faint':
+            textEl.textContent = a.message;
+            if (a.player === 'p1') animateFaint('ply');
+            else animateFaint('opp');
+            playSfx('faint');
+            return Promise.resolve();
+
+        case 'narration':
+            textEl.textContent = a.message;
+            appendNarration(a.turn, a.message);
+            // Also update HP bars to final turn values
+            if (a.p1hp !== undefined) {
+                plyBar.style.width = a.p1hp + '%'; plyText.textContent = Math.round(a.p1hp) + '%';
+                setHpColor(plyBar, a.p1hp);
+            }
+            if (a.p2hp !== undefined) {
+                oppBar.style.width = a.p2hp + '%'; oppText.textContent = Math.round(a.p2hp) + '%';
+                setHpColor(oppBar, a.p2hp);
+            }
+            return playTurnAudio(a.turn);
+
+        case 'winner':
+            stopPlay();
+            stopBGM();
+            document.getElementById('battlePhase').classList.add('hidden');
+            showResult(a);
+            return Promise.resolve();
+
+        default:
+            return Promise.resolve();
+    }
+}
+
+function setHpColor(bar, pct) {
+    if (pct > 50) bar.style.background = '#4ade80';
+    else if (pct > 20) bar.style.background = '#f7d94e';
+    else bar.style.background = '#ef4444';
+}
+
+/* ── Animations ─────────────────────────────────── */
+
+function animateAttack(player) {
+    const isP1 = player === 'p1';
+    const sprite = document.getElementById(isP1 ? 'plySprite' : 'oppSprite');
+    sprite.classList.add('attack-lunge');
+    setTimeout(() => sprite.classList.remove('attack-lunge'), 400);
+}
+
+function animateHit(who) {
+    const flash = document.getElementById(who + 'HitFlash');
+    flash.classList.add('active');
+    const sprite = document.getElementById(who === 'ply' ? 'plySprite' : 'oppSprite');
+    sprite.classList.add('hit-shake');
+    setTimeout(() => { flash.classList.remove('active'); sprite.classList.remove('hit-shake'); }, 350);
+}
+
+function animateFaint(who) {
+    const sprite = document.getElementById(who === 'ply' ? 'plySprite' : 'oppSprite');
+    sprite.classList.add('faint');
+}
+
+function flashScreen(color) {
+    const bg = document.querySelector('.battle-bg');
+    bg.style.boxShadow = `inset 0 0 80px ${color}`;
+    setTimeout(() => { bg.style.boxShadow = 'none'; }, 300);
+}
+
+/* ── Move name popup ────────────────────────────── */
+
+function showMovePopup(name, type, player) {
+    const popup = document.getElementById('movePopup');
+    popup.textContent = name;
+    popup.className = 'move-name-popup active type-bg-' + (type || 'Normal');
+    popup.style.left = player === 'p1' ? '15%' : '55%';
+    popup.style.top = player === 'p1' ? '65%' : '25%';
+    setTimeout(() => popup.classList.remove('active'), 900);
+}
+
+/* ════════════════════════════════════════════════
+   ATTACK VFX — canvas particle system
+   ════════════════════════════════════════════════ */
+
+const fxCanvas = document.getElementById('fxCanvas');
+const fxCtx = fxCanvas ? fxCanvas.getContext('2d') : null;
+let particles = [];
+let fxAnimFrame = null;
+
+function resizeFxCanvas() {
+    if (!fxCanvas) return;
+    const bg = document.querySelector('.battle-bg');
+    if (!bg) return;
+    fxCanvas.width = bg.offsetWidth;
+    fxCanvas.height = bg.offsetHeight;
+}
+
+// Positions (fractions of canvas)
+const POS = {
+    p1: { x: 0.22, y: 0.72 },   // player sprite center
+    p2: { x: 0.72, y: 0.32 },   // opponent sprite center
+};
+
+// Type -> particle config
+const TYPE_FX = {
+    Fire:     { colors:['#ff4500','#ff8c00','#ffcc00','#fff200'], shape:'circle', count:28, size:[4,12], trail:true,  glow:'#ff4500' },
+    Water:    { colors:['#1e90ff','#00bfff','#87ceeb','#ffffff'], shape:'drop',   count:22, size:[3,10], trail:false, glow:'#1e90ff' },
+    Electric: { colors:['#ffd700','#fff44f','#ffffff','#ffe066'], shape:'bolt',   count:18, size:[3,14], trail:true,  glow:'#ffd700' },
+    Grass:    { colors:['#22c55e','#4ade80','#86efac','#bbf7d0'], shape:'leaf',   count:20, size:[4,10], trail:false, glow:'#22c55e' },
+    Ice:      { colors:['#a5f3fc','#67e8f9','#ffffff','#cffafe'], shape:'crystal',count:24, size:[3,9],  trail:false, glow:'#67e8f9' },
+    Psychic:  { colors:['#d946ef','#e879f9','#f0abfc','#fae8ff'], shape:'ring',   count:14, size:[6,18], trail:true,  glow:'#d946ef' },
+    Fighting: { colors:['#dc2626','#f97316','#fbbf24','#ffffff'], shape:'star',   count:16, size:[4,12], trail:false, glow:'#dc2626' },
+    Poison:   { colors:['#a855f7','#c084fc','#7c3aed','#e9d5ff'], shape:'circle', count:20, size:[3,10], trail:true,  glow:'#a855f7' },
+    Ground:   { colors:['#a16207','#ca8a04','#d4a030','#8b6914'], shape:'rock',   count:14, size:[5,14], trail:false, glow:'#a16207' },
+    Flying:   { colors:['#93c5fd','#bfdbfe','#dbeafe','#ffffff'], shape:'slash',  count:12, size:[4,16], trail:true,  glow:'#93c5fd' },
+    Bug:      { colors:['#84cc16','#a3e635','#bef264','#d9f99d'], shape:'circle', count:22, size:[2,7],  trail:false, glow:'#84cc16' },
+    Rock:     { colors:['#78716c','#a8a29e','#d6d3d1','#92400e'], shape:'rock',   count:12, size:[6,16], trail:false, glow:'#78716c' },
+    Ghost:    { colors:['#7c3aed','#6d28d9','#a78bfa','#4c1d95'], shape:'ring',   count:14, size:[5,14], trail:true,  glow:'#7c3aed' },
+    Dragon:   { colors:['#7c3aed','#6366f1','#818cf8','#4f46e5'], shape:'star',   count:20, size:[4,12], trail:true,  glow:'#6366f1' },
+    Dark:     { colors:['#1c1917','#44403c','#78716c','#292524'], shape:'circle', count:20, size:[4,12], trail:true,  glow:'#44403c' },
+    Steel:    { colors:['#d4d4d8','#a1a1aa','#e4e4e7','#ffffff'], shape:'star',   count:16, size:[3,10], trail:false, glow:'#a1a1aa' },
+    Fairy:    { colors:['#f9a8d4','#f472b6','#fbcfe8','#fce7f3'], shape:'circle', count:24, size:[3,9],  trail:true,  glow:'#f472b6' },
+    Normal:   { colors:['#d4d4d4','#e5e5e5','#ffffff','#a3a3a3'], shape:'star',   count:14, size:[3,10], trail:false, glow:'#d4d4d4' },
+};
+
+function fireAttackVFX(type, attackerPlayer) {
+    resizeFxCanvas();
+    if (!fxCtx) return;
+    const fx = TYPE_FX[type] || TYPE_FX.Normal;
+    const from = POS[attackerPlayer];
+    const to = attackerPlayer === 'p1' ? POS.p2 : POS.p1;
+    const W = fxCanvas.width, H = fxCanvas.height;
+
+    for (let i = 0; i < fx.count; i++) {
+        const delay = i * 15 + Math.random() * 60;
+        const size = fx.size[0] + Math.random() * (fx.size[1] - fx.size[0]);
+        const color = fx.colors[Math.floor(Math.random() * fx.colors.length)];
+        const spread = 30 + Math.random() * 20;
+        const speed = 0.012 + Math.random() * 0.018;
+
+        particles.push({
+            x: from.x * W + (Math.random() - 0.5) * spread,
+            y: from.y * H + (Math.random() - 0.5) * spread,
+            tx: to.x * W + (Math.random() - 0.5) * 40,
+            ty: to.y * H + (Math.random() - 0.5) * 40,
+            size, color, shape: fx.shape,
+            progress: 0,
+            speed,
+            delay,
+            born: performance.now(),
+            trail: fx.trail,
+            glow: fx.glow,
+            alpha: 1,
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: (Math.random() - 0.5) * 0.15,
+        });
+    }
+
+    if (!fxAnimFrame) fxLoop();
+}
+
+function fxLoop() {
+    if (!fxCtx) return;
+    const now = performance.now();
+    fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+
+    particles = particles.filter(p => {
+        const elapsed = now - p.born;
+        if (elapsed < p.delay) return true; // waiting
+
+        p.progress += p.speed;
+        if (p.progress > 1.3) return false; // done
+
+        const t = Math.min(p.progress, 1);
+        // Ease-in curve
+        const et = t * t;
+        const x = p.x + (p.tx - p.x) * et;
+        const y = p.y + (p.ty - p.y) * et - Math.sin(t * Math.PI) * 30;
+        p.alpha = t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1;
+        p.rotation += p.rotSpeed;
+
+        fxCtx.save();
+        fxCtx.globalAlpha = p.alpha;
+        fxCtx.translate(x, y);
+        fxCtx.rotate(p.rotation);
+
+        // Glow
+        if (p.trail) {
+            fxCtx.shadowColor = p.glow;
+            fxCtx.shadowBlur = p.size * 2;
+        }
+
+        fxCtx.fillStyle = p.color;
+
+        switch (p.shape) {
+            case 'circle':
+                fxCtx.beginPath();
+                fxCtx.arc(0, 0, p.size, 0, Math.PI * 2);
+                fxCtx.fill();
+                break;
+
+            case 'star': {
+                const s = p.size;
+                fxCtx.beginPath();
+                for (let i = 0; i < 5; i++) {
+                    const a = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+                    const r = i % 2 === 0 ? s : s * 0.4;
+                    fxCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+                }
+                fxCtx.closePath();
+                fxCtx.fill();
+                break;
+            }
+
+            case 'drop': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.arc(0, s * 0.3, s * 0.7, 0, Math.PI, true);
+                fxCtx.lineTo(0, -s);
+                fxCtx.closePath();
+                fxCtx.fill();
+                break;
+            }
+
+            case 'bolt': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.moveTo(-s * 0.3, -s);
+                fxCtx.lineTo(s * 0.2, -s * 0.15);
+                fxCtx.lineTo(-s * 0.1, -s * 0.15);
+                fxCtx.lineTo(s * 0.4, s);
+                fxCtx.lineTo(-s * 0.1, s * 0.15);
+                fxCtx.lineTo(s * 0.2, s * 0.15);
+                fxCtx.closePath();
+                fxCtx.fill();
+                break;
+            }
+
+            case 'leaf': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.ellipse(0, 0, s * 0.4, s, 0, 0, Math.PI * 2);
+                fxCtx.fill();
+                // vein
+                fxCtx.strokeStyle = 'rgba(0,0,0,0.2)';
+                fxCtx.lineWidth = 0.5;
+                fxCtx.beginPath();
+                fxCtx.moveTo(0, -s);
+                fxCtx.lineTo(0, s);
+                fxCtx.stroke();
+                break;
+            }
+
+            case 'crystal': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.moveTo(0, -s);
+                fxCtx.lineTo(s * 0.6, -s * 0.2);
+                fxCtx.lineTo(s * 0.6, s * 0.4);
+                fxCtx.lineTo(0, s);
+                fxCtx.lineTo(-s * 0.6, s * 0.4);
+                fxCtx.lineTo(-s * 0.6, -s * 0.2);
+                fxCtx.closePath();
+                fxCtx.fill();
+                break;
+            }
+
+            case 'ring': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.arc(0, 0, s, 0, Math.PI * 2);
+                fxCtx.lineWidth = s * 0.3;
+                fxCtx.strokeStyle = p.color;
+                fxCtx.stroke();
+                break;
+            }
+
+            case 'rock': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.moveTo(-s, 0);
+                fxCtx.lineTo(-s * 0.5, -s * 0.8);
+                fxCtx.lineTo(s * 0.4, -s * 0.9);
+                fxCtx.lineTo(s, -s * 0.1);
+                fxCtx.lineTo(s * 0.6, s * 0.7);
+                fxCtx.lineTo(-s * 0.3, s * 0.6);
+                fxCtx.closePath();
+                fxCtx.fill();
+                break;
+            }
+
+            case 'slash': {
+                const s = p.size;
+                fxCtx.beginPath();
+                fxCtx.moveTo(-s, s * 0.5);
+                fxCtx.quadraticCurveTo(0, -s * 0.3, s, -s * 0.5);
+                fxCtx.lineWidth = s * 0.25;
+                fxCtx.strokeStyle = p.color;
+                fxCtx.lineCap = 'round';
+                fxCtx.stroke();
+                break;
+            }
+
+            default:
+                fxCtx.beginPath();
+                fxCtx.arc(0, 0, p.size, 0, Math.PI * 2);
+                fxCtx.fill();
+        }
+
+        fxCtx.restore();
+
+        // Impact flash at target
+        if (t > 0.9 && t < 1.05) {
+            fxCtx.save();
+            fxCtx.globalAlpha = (1 - (t - 0.9) / 0.15) * 0.4;
+            fxCtx.fillStyle = p.glow;
+            fxCtx.shadowColor = p.glow;
+            fxCtx.shadowBlur = 30;
+            fxCtx.beginPath();
+            fxCtx.arc(p.tx, p.ty, 20 + (t - 0.9) * 200, 0, Math.PI * 2);
+            fxCtx.fill();
+            fxCtx.restore();
+        }
+
+        return true;
+    });
+
+    if (particles.length > 0) {
+        fxAnimFrame = requestAnimationFrame(fxLoop);
+    } else {
+        fxAnimFrame = null;
+    }
+}
+
+function appendNarration(turn, text) {
+    const log = document.getElementById('narrationLog');
+    const div = document.createElement('div');
+    div.className = 'narration-entry';
+    div.innerHTML = `<span class="nar-turn">T${turn}</span> ${text}`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+}
+
+/* ── Playback controls ──────────────────────────── */
+
+function baseDelay(actionType) {
+    switch (actionType) {
+        case 'turn': return 800;
+        case 'move': return 1400;
+        case 'damage': return 900;
+        case 'supereffective': case 'resisted': case 'crit': return 1000;
+        case 'faint': return 1800;
+        case 'narration': return 2200;
+        case 'text': return 1200;
+        case 'winner': return 500;
+        default: return 800;
+    }
+}
+
+function getDelay(actionType) {
+    return baseDelay(actionType) / SPEEDS[speedIdx];
+}
+
+function startPlay() {
+    if (isPlaying) return;
+    isPlaying = true;
+    document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646; Pause';
+    scheduleNext();
+}
+
+function stopPlay() {
+    if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    isPlaying = false;
+    stopTts();
+    document.getElementById('btnPlayPause').innerHTML = '&#9654; Play';
+}
+
+function scheduleNext() {
+    if (actionIdx >= allActions.length - 1) { stopPlay(); return; }
+    const currentType = allActions[actionIdx] ? allActions[actionIdx].type : 'text';
+    playTimer = setTimeout(() => {
+        playTimer = null;
+        Promise.resolve(nextAction()).finally(() => {
+            if (isPlaying) {
+                scheduleNext();
+            }
+        });
+    }, getDelay(currentType));
+}
+
+function togglePlay() {
+    if (isPlaying) stopPlay();
+    else startPlay();
+}
+
+function nextAction() {
+    if (actionIdx < allActions.length - 1) {
+        actionIdx++;
+        return renderAction(allActions[actionIdx]);
+    }
+    return Promise.resolve();
+}
+
+function prevAction() {
+    stopTts();
+    if (actionIdx > 0) {
+        // Reset sprites
+        document.getElementById('plySprite').classList.remove('faint');
+        document.getElementById('oppSprite').classList.remove('faint');
+        actionIdx--;
+        // Re-render from scratch up to this point (to get HP state correct)
+        rebuildState(actionIdx);
+    }
+}
+
+function rebuildState(upTo) {
+    // Reset HP
+    let p1hp = 100, p2hp = 100;
+    document.getElementById('plySprite').classList.remove('faint');
+    document.getElementById('oppSprite').classList.remove('faint');
+    document.getElementById('narrationLog').innerHTML = '';
+
+    for (let i = 0; i <= upTo; i++) {
+        const a = allActions[i];
+        if (a.type === 'damage') {
+            let pct = 0;
+            if (a.hp_text && a.hp_text !== '0 fnt') {
+                const parts = a.hp_text.split('/');
+                if (parts.length === 2) pct = (parseFloat(parts[0]) / parseFloat(parts[1].split(' ')[0])) * 100;
+            }
+            if (a.player === 'p1') p1hp = pct; else p2hp = pct;
+        }
+        if (a.type === 'narration') appendNarration(a.turn, a.message);
+        if (a.type === 'faint') {
+            if (a.player === 'p1') document.getElementById('plySprite').classList.add('faint');
+            else document.getElementById('oppSprite').classList.add('faint');
+        }
+        if (a.type === 'turn') document.getElementById('turnCounter').textContent = `Turn ${a.turn}`;
+    }
+
+    const plyBar = document.getElementById('plyHpBar');
+    const oppBar = document.getElementById('oppHpBar');
+    plyBar.style.width = p1hp + '%'; document.getElementById('plyHpText').textContent = Math.round(p1hp) + '%';
+    oppBar.style.width = p2hp + '%'; document.getElementById('oppHpText').textContent = Math.round(p2hp) + '%';
+    setHpColor(plyBar, p1hp);
+    setHpColor(oppBar, p2hp);
+
+    // Show current text
+    const a = allActions[upTo];
+    if (a.message) document.getElementById('textContent').textContent = a.message;
+}
+
+function cycleSpeed() {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    document.getElementById('btnSpeed').textContent = SPEEDS[speedIdx] + 'x';
+}
+
+/* ── Result screen ──────────────────────────────── */
+
+function showResult(a) {
+    document.getElementById('resultPhase').classList.remove('hidden');
+
+    const f1 = battleData.fighter1;
+    const f2 = battleData.fighter2;
+    const isP1 = battleData.result.winner_player === 'p1';
+    const winner = isP1 ? f1 : f2;
+
+    document.getElementById('resultWinner').innerHTML = `
+        <img class="result-sprite" src="${spriteUrl(winner.pokemon, false)}"
+             onerror="this.src='${spriteFallback(winner.pokemon, false)}'" alt="">
+        <h2>${winner.name}'s ${winner.pokemon} wins!</h2>
+        <p>Victory in ${battleData.result.total_turns} turns</p>
+    `;
+    document.getElementById('resultNarration').textContent = battleData.result.final_narration;
+    playTurnAudio('final');
+}
+</script>
+
+</body>
+</html>

@@ -1,4 +1,4 @@
-"""Pydantic models for the LinkedIn Battle Royal system."""
+"""Pydantic models for the LinkedIn Battle Royal system (Pokemon Showdown integration)."""
 
 from typing import Dict, List, Optional
 
@@ -39,78 +39,115 @@ class FighterProfile(BaseModel):
     projects: List[str] = Field(default_factory=list)
 
 
-# --- Battle Models ---
+# --- Pokemon Showdown-Compatible Battle Models ---
 
-VALID_TYPES = [
-    "ML-Research", "Full-Stack", "Data-Science", "DevOps", "Security",
-    "Mobile", "Cloud", "Blockchain", "Design", "Management",
-    "Education", "Consulting",
+POKEMON_TYPES = [
+    "Normal", "Fire", "Water", "Electric", "Grass", "Ice",
+    "Fighting", "Poison", "Ground", "Flying", "Psychic",
+    "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy",
+]
+
+POKEMON_NATURES = [
+    "Hardy", "Lonely", "Brave", "Adamant", "Naughty",
+    "Bold", "Docile", "Relaxed", "Impish", "Lax",
+    "Timid", "Hasty", "Serious", "Jolly", "Naive",
+    "Modest", "Mild", "Quiet", "Bashful", "Rash",
+    "Calm", "Gentle", "Sassy", "Careful", "Quirky",
 ]
 
 
-class FighterStats(BaseModel):
-    """Pokemon-style stats derived from a profile."""
-    hp: int = Field(ge=100, le=300, description="Based on total years of experience")
-    attack: int = Field(ge=1, le=100, description="Technical/hard skill count & depth")
-    defense: int = Field(ge=1, le=100, description="Education level + certifications")
-    sp_attack: int = Field(ge=1, le=100, description="Publications, awards, notable projects")
-    sp_defense: int = Field(ge=1, le=100, description="Leadership roles, languages, soft skills")
-    speed: int = Field(ge=1, le=100, description="Career progression velocity")
-    types: List[str] = Field(min_length=1, max_length=2)
+class EVSpread(BaseModel):
+    """EV distribution for a Pokemon (max 510 total, max 252 per stat)."""
+    hp: int = Field(ge=0, le=252, default=0)
+    atk: int = Field(ge=0, le=252, default=0)
+    def_: int = Field(ge=0, le=252, default=0, alias="def")
+    spa: int = Field(ge=0, le=252, default=0)
+    spd: int = Field(ge=0, le=252, default=0)
+    spe: int = Field(ge=0, le=252, default=0)
+
+    model_config = {"populate_by_name": True}
 
 
 class BattleMove(BaseModel):
-    """A signature battle move for a fighter."""
-    name: str
-    description: str = ""
-    power: int = Field(ge=0, le=120, description="0 for status moves")
+    """A custom battle move in Pokemon Showdown format."""
+    id: str = Field(description="PS move ID (lowercase, no spaces)")
+    name: str = Field(description="Display name of the move")
+    pp: int = Field(ge=1, le=40, default=10)
+    type: str = Field(description="One of the 18 Pokemon types")
+    category: str = Field(description="Physical, Special, or Status")
+    basePower: int = Field(ge=0, le=120, default=0, description="0 for status moves")
     accuracy: int = Field(ge=50, le=100, default=100)
-    category: str = Field(description="physical, special, or status")
-    move_type: str = Field(description="One of the VALID_TYPES")
-    stat_effect: Optional[str] = Field(
-        default=None,
-        description="e.g. '+defense', '-speed' for status moves",
-    )
+    description: str = ""
+
+
+class PokemonMapping(BaseModel):
+    """Maps a person's profile to a Pokemon species."""
+    species: str = Field(description="Pokemon species name (e.g., 'Alakazam')")
+    reasoning: str = Field(description="Why this Pokemon was chosen for this person")
+    moves: List[BattleMove] = Field(min_length=4, max_length=4)
+    evs: EVSpread
+    nature: str = Field(description="One of 25 Pokemon natures")
+    ability: str = Field(default="", description="Pokemon ability (blank for default)")
 
 
 class Fighter(BaseModel):
-    """A fully built fighter ready for battle."""
+    """A fully built fighter ready for PS battle."""
     profile: FighterProfile
-    stats: FighterStats
-    moves: List[BattleMove] = Field(min_length=4, max_length=4)
-    current_hp: int = 0
-
-    def model_post_init(self, _context):
-        if self.current_hp == 0:
-            self.current_hp = self.stats.hp
-
-    @property
-    def is_fainted(self) -> bool:
-        return self.current_hp <= 0
+    pokemon_species: str = Field(description="Pokemon species (e.g., 'Alakazam')")
+    mapping: PokemonMapping
+    level: int = Field(default=50, ge=1, le=100)
 
     @property
     def display_name(self) -> str:
         return self.profile.name
 
+    @property
+    def pokemon_display(self) -> str:
+        return f"{self.profile.name}'s {self.pokemon_species}"
 
-class TurnResult(BaseModel):
-    """Result of a single battle turn."""
+
+class BattleConfig(BaseModel):
+    """Pokemon Showdown battle format configuration."""
+    format_id: str = "gen9customgame"
+    level: int = 50
+
+
+class PSEvent(BaseModel):
+    """A parsed Pokemon Showdown protocol event."""
+    type: str = Field(description="Event type (e.g., 'move', 'damage', 'win')")
+    player: str = ""
+    pokemon: str = ""
+    details: str = ""
+    extra: Dict = Field(default_factory=dict)
+
+
+class PSTurnAction(BaseModel):
+    """A single action within a turn (move, damage, etc.)."""
+    action: str = Field(description="'move', 'damage', 'supereffective', 'resisted', 'crit', 'faint', 'miss'")
+    player: str = ""
+    move_name: str = ""
+    move_type: str = ""
+    target: str = ""
+    hp_text: str = ""
+    message: str = ""
+
+
+class PSTurnResult(BaseModel):
+    """Parsed results from a single PS turn."""
     turn_number: int
-    attacker: str
-    defender: str
-    move_used: str
-    damage: int = 0
-    effectiveness: str = "neutral"
-    critical_hit: bool = False
-    attacker_hp: int
-    defender_hp: int
+    actions: List[PSTurnAction] = Field(default_factory=list)
+    p1_hp_pct: float = 100.0
+    p2_hp_pct: float = 100.0
     narration: str = ""
+    raw_output: str = ""
 
 
-class BattleLog(BaseModel):
-    """Complete battle record for frontend consumption."""
+class PSBattleLog(BaseModel):
+    """Complete battle record from a PS battle."""
     fighter_1: Dict
     fighter_2: Dict
-    turns: List[TurnResult] = Field(default_factory=list)
+    turns: List[PSTurnResult] = Field(default_factory=list)
     winner: str = ""
+    winner_player: str = ""
     final_narration: str = ""
+    raw_protocol: str = ""
